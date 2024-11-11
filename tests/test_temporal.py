@@ -7,7 +7,7 @@ from pandas.testing import assert_frame_equal, assert_index_equal
 from sklearn.dummy import DummyRegressor  # type: ignore
 from sklearn.pipeline import Pipeline  # type: ignore
 
-from gingado.utils import get_timefeat, dates_Xy, TemporalFeatureTransformer
+from gingado.utils import get_timefeat, dates_Xy, TemporalFeatureTransformer, pad_sequences
 from gingado.internals import (
     DayFeatures,
     Frequency,
@@ -544,3 +544,69 @@ def test_pipeline():
     _ = pipeline.predict(X)
 
     # TODO: test feature names once correctly implemented
+
+
+def test_pad_sequences_fewer_rows_timedim_true():
+    """Test pad_sequences with fewer rows than max_lags when timedim=True."""
+    data = pd.DataFrame({
+        'feature1': [1, 2, 3],
+        'feature2': [4, 5, 6]
+    })
+    max_lags = 5
+    output1 = pad_sequences(data, max_lags, use_timedim=True)
+
+    # Test expected shape and that original values are contained at the end when padded
+    assert output1.shape == (1, max_lags, 2)
+    assert (output1[0, -3:] == data.values).all()
+
+
+def test_pad_sequences_fewer_rows_timedim_false():
+    """Test pad_sequences with fewer rows than max_lags when timedim=False."""
+    data = pd.DataFrame({
+        'feature1': [1, 2, 3],
+        'feature2': [4, 5, 6]
+    })
+    max_lags = 5
+    output = pad_sequences(data, max_lags, use_timedim=False)
+    # Test that the shape contains no timedim and that original values are contained at the end 
+    # when padded
+    assert output.shape == (1, max_lags * 2)
+    assert (output[0, -6:].reshape(-1, 2) == data.values).all()
+
+
+def test_pad_sequences_exactly_max_lags_timedim_true():
+    """Test pad_sequences with exactly max_lags rows when timedim=True."""
+    data = pd.DataFrame({
+        'feature1': [1, 2, 3, 4, 5],
+        'feature2': [6, 7, 8, 9, 10]
+    })
+    max_lags = 5
+    output = pad_sequences(data, max_lags, use_timedim=True)
+
+    # Make sure that no padding is done when the number of rows is exactly max_lags
+    assert output.shape == (1, max_lags, 2)
+    assert (output[0] == data.values).all()
+
+
+def test_pad_sequences_more_rows_timedim_true():
+    """Test pad_sequences with more rows than max_lags when timedim=True."""
+    data = pd.DataFrame({
+        'feature1': [1, 2, 3, 4, 5, 6, 7],
+        'feature2': [8, 9, 10, 11, 12, 13, 14]
+    })
+    max_lags = 5
+    output = pad_sequences(data, max_lags, use_timedim=True)
+    assert output.shape == (1, max_lags, 2)
+    assert (output[0] == data.values[-5:]).all()
+
+
+def test_pad_sequences_more_rows_timedim_false():
+    """Test pad_sequences with more rows than max_lags when timedim=False."""
+    data = pd.DataFrame({
+        'feature1': [1, 2, 3, 4, 5, 6, 7],
+        'feature2': [8, 9, 10, 11, 12, 13, 14]
+    })
+    max_lags = 5
+    output = pad_sequences(data, max_lags, use_timedim=False)
+    assert output.shape == (1, max_lags * 2)
+    assert (output[0].reshape(-1, 2) == data.values[-5:]).all()

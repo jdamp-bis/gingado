@@ -3,6 +3,7 @@ import datetime
 import numpy as np
 import pandas as pd
 from gingado.internals import DayFeatures, WeekFeatures, MonthFeatures, QuarterFeatures, DateTimeLike, Frequency, FrequencyLike, validate_and_get_freq, _check_valid_features, _get_day_features, _get_week_features, _get_month_features, _get_quarter_features
+import keras
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 
@@ -334,3 +335,52 @@ class TemporalFeatureTransformer(BaseEstimator, TransformerMixin):
             "month_features": [f.value for f in MonthFeatures],
             "quarter_features": [f.value for f in QuarterFeatures],
         }
+
+
+def pad_sequences(
+        data: pd.DataFrame,
+        max_lags: int,
+        use_timedim: bool = True
+    ) -> np.array:
+    """
+    Pads a pandas DataFrame to a specified length using zero padding. The output dimension can be 
+    adjusted based on a time dimension flag.
+
+    Args:
+        data (pd.DataFrame): The input data with shape (n_samples, n_features) where n_samples is 
+            the number of time steps, and n_features is the number of features.
+        max_lags (int): The length to pad or truncate the input data to. If data has fewer rows than 
+            max_lags, it will be padded; if more, it will be truncated.
+        use_timedim (bool): If True, returns the output in 3D shape (1, max_lags, n_features); if False, 
+            returns a 2D shape (1, max_lags * n_features).
+
+    Returns:
+        np.array: The padded or truncated data with shape depending on `use_timedim`:
+            - (1, max_lags, n_features) if `use_timedim=True`
+            - (1, max_lags * n_features) if `use_timedim=False`
+
+    Examples:
+        >>> data = pd.DataFrame({'feature1': [1, 2, 3], 'feature2': [4, 5, 6]})
+        >>> pad_sequences(data, max_lags=5, use_timedim=True).shape
+        (1, 5, 2)
+
+        >>> pad_sequences(data, max_lags=5, timedim=False).shape
+        (1, 10)
+    """
+
+    sequences = [data.values]
+    # Pad sequences to max_lags with zero padding
+    padded_sequences = keras.utils.pad_sequences(
+        sequences,
+        maxlen=max_lags,
+        dtype='float32',
+        padding='pre',
+        truncating='pre'
+    )
+
+    n_features = data.shape[1]
+    if use_timedim:
+        output = padded_sequences.reshape(1, max_lags, n_features)
+    else:
+        output = padded_sequences.reshape(1, max_lags * n_features)
+    return output
