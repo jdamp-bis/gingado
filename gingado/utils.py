@@ -230,7 +230,7 @@ def get_timefeat(
     if freq in [Frequency.DAILY, Frequency.WEEKLY]:
         features.append(_get_week_features(df.index))
 
-    if freq in [Frequency.DAILY, Frequency.WEEKLY, Frequency.MONTHLY]:
+    if freq in [Frequency.DAILY, Frequency.WEEKLY, Frequency.MONTHLY, Frequency.MONTHLY_END]:
         features.append(_get_month_features(df.index))
 
     # We currently use these for all frequencies

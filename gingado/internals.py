@@ -186,12 +186,14 @@ class Frequency(Enum):
         DAILY (str): Daily frequency ('D')
         WEEKLY (str): Weekly frequency ('W')
         MONTHLY (str): Monthly start frequency ('MS')
+        MONTHLY_END (str): Monthly end frequency ('ME')
         QUARTERLY (str): Quarterly start frequency ('QS')
     """
 
     DAILY = "D"
     WEEKLY = "W"
     MONTHLY = "MS"
+    MONTHLY_END = "ME"
     QUARTERLY = "QS"
 
 
@@ -319,7 +321,7 @@ def _get_temporal_feature_names(freq: Frequency | None = None) -> list[str]:
         all_features = [DayFeatures, WeekFeatures, MonthFeatures, QuarterFeatures]
     elif freq == Frequency.WEEKLY:
         all_features = [WeekFeatures, MonthFeatures, QuarterFeatures]
-    elif freq == Frequency.MONTHLY:
+    elif freq in [Frequency.MONTHLY, Frequency.MONTHLY_END]:
         all_features = [MonthFeatures, QuarterFeatures]
     else:
         all_features = [QuarterFeatures]
