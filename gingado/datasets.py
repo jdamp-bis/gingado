@@ -119,7 +119,7 @@ def load_CB_speeches(
     # Concat all dataframes into single dataframe and return
     return pd.concat(cb_speeches_dfs)
 
-def load_lr_tanzania_data(wide_format: bool = False) -> dict[str, pd.DataFrame]:
+def load_lr_tanzania_data(wide_format: bool = False, datetime_index: bool = False) -> dict[str, pd.DataFrame]:
     """
     Loads liquidity risk data from CSV files.
 
@@ -132,7 +132,8 @@ def load_lr_tanzania_data(wide_format: bool = False) -> dict[str, pd.DataFrame]:
     Parameters:
     wide_format (bool): If True, returns data in wide format with pivoted columns. Column names will
         be in the format BANK_CODE__VAR_NAME.
-
+    datetime_index (bool): If True, sets the 'REPORTINGDATE' column as the index and converts it to
+        a datetime index.
     Returns:
     dict[str, pd.DataFrame]: A dictionary with keys 'w' for weekly data and 'm' for monthly data.
         The values are pandas DataFrames containing the data for each frequency.
@@ -162,7 +163,11 @@ def load_lr_tanzania_data(wide_format: bool = False) -> dict[str, pd.DataFrame]:
         df_monthly = pivot_lr(df_monthly)
         df_weekly = pivot_lr(df_weekly)
 
-    return {"w": df_weekly, "m": df_monthly}
+    if datetime_index:
+        df_monthly.set_index("REPORTINGDATE", inplace=True)
+        df_weekly.set_index("REPORTINGDATE", inplace=True)
+
+    return {"W": df_weekly, "ME": df_monthly}
 
 def load_monpol_statements(
     year: str | int | list = 'all',
