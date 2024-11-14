@@ -1,0 +1,197 @@
+---
+jupyter: python3
+---
+
+```{python}
+import pandas as pd
+import numpy as np  
+
+from gingado.utils import get_timefeat, TemporalFeatureTransformer
+from gingado.datasets import load_lr_tanzania_data
+
+from sklearn.preprocessing import LabelEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+
+from keras.models import Model
+from keras.layers import LSTM, Dense, Input, Average, Masking
+from keras.optimizers import Adam
+
+from sklearn import set_config
+
+# Set the global configuration to output pandas DataFrames
+set_config(transform_output="pandas")
+```
+
+```{python}
+data = load_lr_tanzania_data(wide_format=False, datetime_index=True)
+
+for freq, df in data.items():
+    print(f"Frequency: {freq}, data shape: {df.shape}")
+
+display(data['W'].head())
+display(data['ME'].head())
+```
+
+Use all weekly data and the monthly MLA as a target. In addition, also include the lags of the monthly MLA with the data.
+To get started, start with data for one bank. The original paper mentions B5015 and B5912 as the largest banks, so take one of those.
+
+```{python}
+bank_code = "B5015"
+
+data["ME"] = data["ME"][["MLA", "INSTITUTIONCODE"]]
+
+for freq, df in data.items():
+    mask = df["INSTITUTIONCODE"] == bank_code
+    data[freq] = df[mask].drop(columns=["INSTITUTIONCODE"])
+
+
+```
+
+```{python}
+from gingado.utils import Lag
+
+Lag(lags=1).fit_transform(data["ME"])
+data["ME"] = data["ME"].join(Lag(lags=1).fit_transform(data["ME"]))
+data["ME"]
+```
+
+```{python}
+# Select target
+y = data["ME"].loc[:, ["MLA"]]
+data["ME"] = data["ME"].drop(columns=["MLA"])
+```
+
+```{python}
+# Calculate the split index
+split_index = len(data["W"]) * 2 // 3
+
+# Find the corresponding date
+split_date = data["W"].index[split_index]
+
+print(f"The date that splits the DataFrame into a 2:1 ratio is: {split_date}")
+```
+
+```{python}
+# Split into train and test samples
+
+X_train = {}
+X_test = {}
+y_train = y.loc[y.index < split_date]
+y_test = y.loc[y.index >= split_date]
+for freq, df in data.items():
+   X_train[freq] = df.loc[df.index < split_date]
+   X_test[freq] = df.loc[df.index >= split_date]
+
+```
+
+```{python}
+# Scale the data:
+from sklearn.preprocessing import StandardScaler
+scalers = {}
+X_train_norm = {}
+X_test_norm = {}
+for freq, df in X_train.items():
+    scalers[freq] = StandardScaler().fit(df)
+    X_train_norm[freq] = scalers[freq].transform(X_train[freq])
+    X_test_norm[freq] = scalers[freq].transform(X_test[freq])
+
+target_scaler = StandardScaler()
+y_train_norm = target_scaler.fit_transform(y_train)
+y_test_norm = target_scaler.transform(y_test)    
+```
+
+```{python}
+# Create further sub-splits:
+from collections import defaultdict
+from sklearn.model_selection import TimeSeriesSplit
+from gingado.utils import pad_sequences
+
+
+def process_fold(
+        data: dict[str, pd.DataFrame],
+        y: pd.Series, split: pd.DatetimeIndex,
+        max_lags: dict[str, int],
+        timedim: bool = True
+    ):
+    X_split = defaultdict(list)
+    y_split = []
+    for sample_date in split:
+        
+        for freq in data:
+            # Select data up to the sample date and pad if necessary
+            dates = data[freq][:sample_date].index[:-1]
+            data_to_pad = data[freq].loc[dates]
+            padded = pad_sequences(data_to_pad, max_lags[freq], use_timedim=timedim)
+            X_split[freq].append(padded)
+        y_split.append([y.loc[sample_date]])
+    for freq in X_split:
+        X_split[freq] = np.squeeze(X_split[freq])
+    return X_split, np.array(y_split)
+
+
+
+max_lags = {"ME": 3, "W": 12}
+
+tscv = TimeSeriesSplit(n_splits=3)
+timedim = True
+
+cv_dates = [
+    (y.index[m], y.index[n]) for m, n in tscv.split(y_train_norm)
+]
+
+X_split_train = {}
+y_split_train = {}
+X_split_val = {}
+y_split_val = {}
+
+for n, (train_split, val_split) in enumerate(cv_dates):
+    XX, yy = process_fold(X_train_norm, y_train_norm, train_split, max_lags, timedim)
+    X_split_train[n] = XX
+    y_split_train[n] = yy
+
+    XX, yy =  process_fold(X_train_norm, y_train_norm, val_split, max_lags, timedim)
+    X_split_val[n] = XX
+    y_split_val[n] = yy
+```
+
+```{python}
+# Create a simple LSTM model using keras that can process two multivariate time series of different frequencies and combines them
+# into a single prediction
+# The model will have two LSTM layers, one for each time series, and a Dense layer that combines the output of the two LSTM layers
+dim = 1
+# Define the input layers
+inputs = {
+    freq: Input(shape=(None, data[freq].shape[1]), name=freq) for freq in data}
+lstm_outputs = []
+for freq, inp in inputs.items():
+    mask = Masking(mask_value=0.0, name=f"mask_freq_{freq}")(inp)
+    lstm = LSTM(dim, return_sequences=False, name=f"lstm_freq_{freq}")(mask)
+    lstm_outputs.append(lstm)
+combined = Average(name="lstm_combined")(lstm_outputs)
+out = Dense(1, activation='relu', name="dense_out")(combined)
+
+lstm_model = Model(inputs=inputs, outputs=out)
+lstm_model.compile(optimizer=Adam(1e-1), loss='mean_squared_error')
+lstm_model.summary()
+```
+
+```{python}
+lstm_model.fit(
+    X_split_train[1],
+    y_split_train[1],
+    validation_data=(X_split_val[1], y_split_val[1]),
+    epochs=10,
+    batch_size=1,
+    shuffle=True
+)
+```
+
+```{python}
+X_split_val[1]["ME"].shape
+```
+
+```{python}
+X_split_train[2][0]["W"].shape
+```
+
