@@ -1,5 +1,10 @@
 from __future__ import annotations  # Allows forward annotations in Python < 3.10
 
+from typing import Callable
+
+import keras
+from keras.src.models.cloning import clone_model
+from keras.src.wrappers.utils import _check_model
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
@@ -8,8 +13,10 @@ from sklearn.cluster import AffinityPropagation
 from sklearn.manifold import TSNE
 from sklearn.metrics import mean_squared_error
 from sklearn.pipeline import Pipeline
+from statsmodels.tsa.ar_model import AutoReg
 
 from .benchmark import ggdBenchmark, RegressionBenchmark
+from .internals import FrequencyLike
 from .model_documentation import ModelCard, ggdModelDocumentation
 from .utils import read_attr
 
@@ -323,4 +330,69 @@ class MachineControl(BaseEstimator):
 
     def intervention_effect(self):
         "Calculate the intervention effect after the cutoff date"
+        pass
+
+
+class KerasEstimator(BaseEstimator):
+    """Wraps a Keras model for time series predictions to be compatible with scikit-learn"""
+    def __init__(self, 
+                 model: keras.Model | Callable[...,keras.Model],
+                 fit_ar_model: bool = False,
+                 lags: int = 1,
+                 **model_kwargs
+                ):
+        self.model_kwargs = model_kwargs
+        self.model: keras.Model |Callable[...,keras.Model] = model
+        self.ar_model: AutoReg | None = None
+        self.lags = lags
+        self.history: keras.callbacks.History | None = None
+        self.fit_ar_model = fit_ar_model
+
+    def _get_model(self, X, y):
+        if isinstance(self.model, keras.Model):
+            #return clone_model(self.model)
+            return self.model
+        else:
+            args = self.model_kwargs or {}
+            return self.model(X=X, y=y, **args)
+
+    def fit(self, X: dict[FrequencyLike, np.ndarray], y: np.ndarray, **kwargs) -> 'KerasEstimator':
+        self.model = self._get_model(X, y)
+        if not self.model.compiled or not self.model.loss or not self.model.optimizer:
+            raise RuntimeError(
+                "Given model needs to be compiled, and have a loss and an optimizer."
+            )
+        self.history = self.model.fit(
+            X, y, **kwargs
+        )
+        if self.fit_ar_model:
+            self.ar_model = AutoReg(y, lags=self.lags).fit()
+
+        return self
+
+    def predict(self, X: dict[FrequencyLike, np.ndarray]) -> np.ndarray:
+        if self.model is None:
+            raise RuntimeError("Model is not fitted yet. Call 'fit' first.")
+        return self.model.predict(X)
+    
+    def ar_predict(self, y):
+        """
+        Get train and validation predictions
+        """
+        if not self.fit_ar_model:
+            raise RuntimeError(
+                "AR model needs to be fitted, please set 'fit_ar_model' to True"
+            )
+        for t in range(len(y_split_val[1])):
+            # Predict the next value based on the last 3 actual values
+            lag_values = history[-3:]  # Get the last 3 values
+            yhat = model_fit.params[0] + sum(model_fit.params[i + 1] * lag_values[-(i + 1)] for i in range(3))
+            predictions.append(yhat)
+            # Append the actual test value to history (as it becomes part of the known data)
+            history = np.append(history, y_split_val[1][t])
+
+        
+
+    def evaluate():
+        # TODO: do a linear regression to check which model fits better
         pass
